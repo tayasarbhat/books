@@ -1,0 +1,239 @@
+// Copy this code to a new Google Apps Script project
+function doGet() {
+  try {
+    const mainFolderId = '1z-nhd9KVGbHh7LnAkPmT2c7EN3QdXkAH';
+    const mainFolder = DriveApp.getFolderById(mainFolderId);
+    const files = mainFolder.getFiles();
+    const books = [];
+    
+    // Get the JPGs folder
+    const jpgsFolders = mainFolder.getFoldersByName('jpgs');
+    const coverImages = {};
+    
+    if (jpgsFolders.hasNext()) {
+      const jpgsFolder = jpgsFolders.next();
+      const imageFiles = jpgsFolder.getFiles();
+      
+      // Create a map of image files with public URLs
+      while (imageFiles.hasNext()) {
+        const imageFile = imageFiles.next();
+        const imageName = imageFile.getName().toLowerCase().replace(/\.[^/.]+$/, "");
+        try {
+          // Just store the file ID, we'll construct the URL in the frontend
+          coverImages[imageName] = `https://drive.google.com/uc?export=view&id=${imageFile.getId()}`;
+        } catch (e) {
+          console.error('Error processing image:', imageName, e);
+        }
+      }
+    }
+    
+    while (files.hasNext()) {
+      const file = files.next();
+      const fileType = file.getMimeType();
+      
+      if (fileType.includes('pdf') || 
+          fileType.includes('document') || 
+          fileType.includes('epub')) {
+        
+        const rawFileName = file.getName();
+        const cleanTitle = formatBookTitle(rawFileName);
+        const category = determineCategory(rawFileName);
+        
+        // Look for matching cover image
+        const fileNameWithoutExt = rawFileName.toLowerCase().replace(/\.[^/.]+$/, "");
+        const coverUrl = coverImages[fileNameWithoutExt] || getCoverUrlForCategory(category);
+        
+        const book = {
+          id: file.getId(),
+          title: cleanTitle,
+          author: determineAuthor(rawFileName),
+          category: category,
+          description: generateDescription(cleanTitle, category),
+          coverUrl: coverUrl,
+          driveLink: file.getUrl(),
+          fileType: getFileExtension(fileType),
+          fileSize: formatFileSize(file.getSize())
+        };
+        
+        books.push(book);
+      }
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      data: books
+    })).setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function formatBookTitle(fileName) {
+  // Remove file extension
+  let title = fileName.replace(/\.[^/.]+$/, "");
+  
+  // Remove common prefixes and suffixes
+  title = title.replace(/^(by|by-|book-|notes-|study-)/i, '');
+  title = title.replace(/(for|by|notes|pdf|study material)$/i, '');
+  
+  // Remove special characters and extra spaces
+  title = title.replace(/[_\-+]/g, ' ');
+  title = title.replace(/\s+/g, ' ');
+  
+  // Capitalize words properly
+  title = title.split(' ')
+    .map(word => {
+      // Don't capitalize certain words unless they're at the start
+      const lowercaseWords = ['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'by', 'in', 'of'];
+      if (lowercaseWords.includes(word.toLowerCase())) {
+        return word.toLowerCase();
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+  
+  // Ensure first character is uppercase
+  title = title.charAt(0).toUpperCase() + title.slice(1);
+  
+  // Remove any remaining special characters
+  title = title.replace(/[^\w\s-]/g, '');
+  
+  return title.trim();
+}
+
+function determineAuthor(fileName) {
+  // Extract author name if present in the format "Title by Author"
+  const byMatch = fileName.match(/by\s+([^.]+)/i);
+  if (byMatch) {
+    return formatBookTitle(byMatch[1]);
+  }
+  
+  // Extract author name if present in parentheses
+  const parenthesesMatch = fileName.match(/\(([^)]+)\)/);
+  if (parenthesesMatch) {
+    return formatBookTitle(parenthesesMatch[1]);
+  }
+  
+  return "Unknown";
+}
+
+function generateDescription(title, category) {
+  const categoryDescriptions = {
+    'QUANTITATIVE APTITUDE': 'A comprehensive guide for mastering mathematical and numerical ability.',
+    'REASONING': 'Essential study material for logical reasoning and analytical ability.',
+    'GENERAL KNOWLEDGE': 'Complete coverage of general knowledge topics and current affairs.',
+    'GENERAL ENGLISH': 'Improve your English language skills with this comprehensive guide.',
+    'GENERAL HINDI': 'संपूर्ण हिंदी भाषा और साहित्य का अध्ययन सामग्री।',
+    'GENERAL AWARENESS': 'Stay updated with current affairs and general awareness topics.',
+    'HISTORY': 'Detailed coverage of historical events and their significance.',
+    'GEOGRAPHY': 'Comprehensive study of physical, political, and human geography.',
+    'SCIENCE': 'In-depth coverage of scientific concepts and principles.',
+    'POLITY': 'Understanding Indian constitution and political system.',
+    'ECONOMY': 'Analysis of economic concepts and Indian economy.',
+    'ENVIRONMENT & ECOLOGY': 'Study material for environmental science and ecological systems.',
+    'SSC': 'Complete preparation guide for Staff Selection Commission exams.',
+    'UPSC': 'Comprehensive study material for Civil Services examination.',
+    'BANKING': 'Complete preparation guide for banking sector examinations.',
+    'RAILWAYS': 'Study material for Railway Recruitment Board examinations.',
+    'DEFENCE': 'Preparation guide for defence services examinations.',
+    'TEACHING APTITUDE': 'Essential material for teaching aptitude and methodology.',
+    'SOCIOLOGY': 'Understanding society, social processes and changes.',
+    'NTA/UGC – NET/JRF': 'Complete guide for NET/JRF examination preparation.',
+    'PUBLICATIONS': 'Latest publications and study materials.',
+    'NEET & AIIMS': 'Comprehensive preparation guide for medical entrance exams.',
+    'JEE MAINS & ADVANCED': 'Complete preparation material for engineering entrance exams.',
+    'ENGINEERING': 'Technical study material for engineering subjects.',
+    'GATE': 'Preparation guide for Graduate Aptitude Test in Engineering.'
+  };
+
+  return `${title} - ${categoryDescriptions[category] || 'A comprehensive study guide for exam preparation.'}`;
+}
+
+function determineCategory(fileName) {
+  fileName = fileName.toUpperCase();
+  
+  const categoryPatterns = {
+    'QUANTITATIVE APTITUDE': /(QUANT|QUANTITATIVE|ARITHMETIC|MATHEMATICS|MATHS)/,
+    'REASONING': /(REASONING|LOGICAL|LOGIC)/,
+    'GENERAL KNOWLEDGE': /(GK|GENERAL KNOWLEDGE|SAMANYA GYAN)/,
+    'GENERAL ENGLISH': /(ENGLISH|GRAMMAR|VOCABULARY)/,
+    'GENERAL HINDI': /(HINDI|SAMANYA HINDI)/,
+    'GENERAL AWARENESS': /(AWARENESS|GA|CURRENT|SAMANYA)/,
+    'HISTORY': /(HISTORY|ITIHAS)/,
+    'GEOGRAPHY': /(GEOGRAPHY|BHUGOL)/,
+    'SCIENCE': /(SCIENCE|PHYSICS|CHEMISTRY|BIOLOGY|VIGYAN)/,
+    'POLITY': /(POLITY|CONSTITUTION|RAJVYAVASTHA)/,
+    'ECONOMY': /(ECONOMY|ECONOMICS|ARTHVYAVASTHA)/,
+    'ENVIRONMENT & ECOLOGY': /(ENVIRONMENT|ECOLOGY|PARYAVARAN)/,
+    'SSC': /(SSC|STAFF SELECTION)/,
+    'UPSC': /(UPSC|IAS|CIVIL SERVICES)/,
+    'BANKING': /(BANK|BANKING|SBI|IBPS)/,
+    'RAILWAYS': /(RAILWAY|RRB|NTPC)/,
+    'DEFENCE': /(DEFENCE|MILITARY|NDA|CDS)/,
+    'TEACHING APTITUDE': /(TEACHING|CTET|TET)/,
+    'SOCIOLOGY': /(SOCIOLOGY|SAMAJ)/,
+    'NTA/UGC – NET/JRF': /(NET|JRF|UGC)/,
+    'PUBLICATIONS': /(PUBLICATION|MAGAZINE|JOURNAL)/,
+    'NEET & AIIMS': /(NEET|AIIMS|MEDICAL)/,
+    'JEE MAINS & ADVANCED': /(JEE|IIT|ADVANCED)/,
+    'ENGINEERING': /(ENGINEERING|ENGINEER)/,
+    'GATE': /(GATE|GRADUATE APTITUDE)/
+  };
+  
+  for (let category in categoryPatterns) {
+    if (categoryPatterns[category].test(fileName)) {
+      return category;
+    }
+  }
+  
+  return 'GENERAL KNOWLEDGE'; // Default category
+}
+
+function getCoverUrlForCategory(category) {
+  const coverUrls = {
+    'QUANTITATIVE APTITUDE': 'https://images.unsplash.com/photo-1509228468518-180dd4864904',
+    'REASONING': 'https://images.unsplash.com/photo-1416339684178-3a239570f315',
+    'GENERAL KNOWLEDGE': 'https://images.unsplash.com/photo-1524995997946-a1c2e315a42f',
+    'GENERAL ENGLISH': 'https://images.unsplash.com/photo-1453733190371-0a9bedd82893',
+    'GENERAL HINDI': 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c',
+    'GENERAL AWARENESS': 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173',
+    'HISTORY': 'https://images.unsplash.com/photo-1461360370896-922624d12aa1',
+    'GEOGRAPHY': 'https://images.unsplash.com/photo-1521295121783-8a321d551ad2',
+    'SCIENCE': 'https://images.unsplash.com/photo-1532094349884-543bc11b234d',
+    'POLITY': 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620',
+    'ECONOMY': 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3',
+    'ENVIRONMENT & ECOLOGY': 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e',
+    'SSC': 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173',
+    'UPSC': 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173',
+    'BANKING': 'https://images.unsplash.com/photo-1601597111158-2fceff292cdc',
+    'RAILWAYS': 'https://images.unsplash.com/photo-1474487548417-781cb71495f3',
+    'DEFENCE': 'https://images.unsplash.com/photo-1579912437766-7896df6d3cd3',
+    'TEACHING APTITUDE': 'https://images.unsplash.com/photo-1509062522246-3755977927d7',
+    'SOCIOLOGY': 'https://images.unsplash.com/photo-1491438590914-bc09fcaaf77a',
+    'NTA/UGC – NET/JRF': 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173',
+    'PUBLICATIONS': 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d',
+    'NEET & AIIMS': 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d',
+    'JEE MAINS & ADVANCED': 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173',
+    'ENGINEERING': 'https://images.unsplash.com/photo-1581094794329-c8112a89af12',
+    'GATE': 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173'
+  };
+  
+  return coverUrls[category] || 'https://images.unsplash.com/photo-1589998059171-988d887df646';
+}
+
+function getFileExtension(mimeType) {
+  if (mimeType.includes('pdf')) return 'PDF';
+  if (mimeType.includes('document')) return 'DOC';
+  if (mimeType.includes('epub')) return 'EPUB';
+  return 'Unknown';
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
