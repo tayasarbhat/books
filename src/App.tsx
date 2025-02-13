@@ -28,7 +28,7 @@ function App() {
   const [totalProgress, setTotalProgress] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
-  const booksPerPage = 10;
+  const booksPerPage = 9;
 
   const placeholderBooks = Array(booksPerPage).fill(null).map((_, i) => ({
     id: `placeholder-${i}`,
